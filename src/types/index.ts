@@ -45,6 +45,7 @@ export interface Milestone {
   paymentReleased: string | null;
   confirmedAt: string | null;
   disputeReason?: string | null;
+  resolutionRationale?: string | null;
   createdAt: string;
   updatedAt: string;
 }

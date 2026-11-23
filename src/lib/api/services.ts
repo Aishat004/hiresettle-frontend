@@ -104,6 +104,9 @@ export const milestonesApi = {
     metadata: ProofMetadata,
   ): Promise<void> => {
     await apiClient.post(`/engagements/${engagementId}/milestones/${index}/proof-metadata`, metadata);
+  /** Store the arbiter's written rationale after resolving a dispute */
+  submitResolutionRationale: async (engagementId: string, index: number, rationale: string): Promise<void> => {
+    await apiClient.post(`/engagements/${engagementId}/milestones/${index}/resolution-rationale`, { rationale });
   },
 };
 
