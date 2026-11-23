@@ -1,19 +1,17 @@
-"use client";
+'use client';
 
-import { useCallback, useState } from "react";
-import { useParams } from "next/navigation";
-import { ArrowLeft, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
-import Link from "next/link";
-import axios from "axios";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { engagementsApi } from "@/lib/api/services";
-import { useAuthStore } from "@/lib/hooks/use-auth-store";
-import { engagementKeys, timerKeys } from "@/lib/query-keys";
-import { MilestoneTimeline } from "@/components/milestones/MilestoneTimeline";
-import { EngagementMeta } from "@/components/engagements/EngagementMeta";
-import { EngagementProgress } from "@/components/engagements/EngagementProgress";
-import { ReplacementBanner } from "@/components/engagements/ReplacementBanner";
-import { ChainEventFeed } from "@/components/engagements/ChainEventFeed";
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft, RefreshCw, Loader2, AlertTriangle, Copy } from 'lucide-react';
+import Link from 'next/link';
+import axios from 'axios';
+import { engagementsApi } from '@/lib/api/services';
+import { useAuthStore } from '@/lib/hooks/use-auth-store';
+import { MilestoneTimeline } from '@/components/milestones/MilestoneTimeline';
+import { EngagementMeta } from '@/components/engagements/EngagementMeta';
+import { EngagementProgress } from '@/components/engagements/EngagementProgress';
+import { ReplacementBanner } from '@/components/engagements/ReplacementBanner';
+import { ChainEventFeed } from '@/components/engagements/ChainEventFeed';
 import {
   engagementStatusBadge,
   engagementStatusLabel,
@@ -24,7 +22,9 @@ import { toReadableError } from "@/lib/utils/toast-error";
 export default function EngagementDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { address } = useAuthStore();
-  const queryClient = useQueryClient();
+  const router = useRouter();
+  const [engagement, setEngagement] = useState<Engagement | null>(null);
+  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const engagementQuery = useQuery({
     queryKey: engagementKeys.detail(id),
@@ -172,18 +172,26 @@ export default function EngagementDetailPage() {
             Created {timeAgo(engagement.createdAt)}
           </p>
         </div>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="btn-secondary text-xs"
-        >
-          {syncing ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-2">
+          {isCompany && (
+            <button
+              onClick={() => router.push(`/dashboard/engagements/create?cloneFrom=${engagement.id}`)}
+              className="btn-secondary text-xs"
+              title="Clone this engagement"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Clone
+            </button>
           )}
-          Sync
-        </button>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn-secondary text-xs"
+          >
+            {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Sync
+          </button>
+        </div>
       </div>
 
       {/* Replacement banner */}
