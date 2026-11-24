@@ -5,9 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Plus, Trash2, Loader2, AlertCircle, Info, RotateCcw, X, ShieldCheck, ChevronRight, User, Briefcase, Layers, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { StrKey } from '@stellar/stellar-sdk';
+import { useQueryClient } from '@tanstack/react-query';
 import { createEngagement } from '@/lib/stellar/contract';
 import { engagementsApi } from '@/lib/api/services';
 import { useAuthStore } from '@/lib/hooks/use-auth-store';
+import { engagementKeys } from '@/lib/query-keys';
 import { generateEngagementId, LEDGERS_PER_DAY, usdcToStroops } from '@/lib/utils';
 import { useEngagementDraft } from '@/lib/hooks/use-engagement-draft';
 import type { MilestoneInput } from '@/types';
@@ -293,6 +295,7 @@ export default function CreateEngagementPage() {
     if (!address || !formIsValid) return;
     setSubmitError(null);
     setLoading(true);
+    let transactionSucceeded = false;
 
     try {
       setTxStep('Building transaction…');
@@ -307,6 +310,7 @@ export default function CreateEngagementPage() {
         milestones,
         retentionDays,
       });
+      transactionSucceeded = true;
 
       setTxStep('Saving to backend…');
       await engagementsApi.create({
@@ -325,9 +329,13 @@ export default function CreateEngagementPage() {
         txHash,
       });
 
+      await queryClient.invalidateQueries({ queryKey: engagementKeys.all });
       router.push(`/dashboard/engagements/${engagementId}`);
       draft.discard();
     } catch (err: any) {
+      if (transactionSucceeded) {
+        await queryClient.invalidateQueries({ queryKey: engagementKeys.all });
+      }
       setSubmitError(err?.message ?? 'Transaction failed. Please try again.');
       // Drop back to the review step so the user sees the error and can retry.
       setStep('review');
