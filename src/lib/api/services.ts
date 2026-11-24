@@ -165,8 +165,15 @@ export const uploadApi = {
 // Events
 // ----------------------------------------------------------
 export const eventsApi = {
-  list: async (params?: { engagementId?: string; page?: number; limit?: number }) => {
-    const { data } = await apiClient.get('/events', { params });
+  list: async (params?: {
+    engagementId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<PaginatedResponse<ChainEvent>> => {
+    const { data } = await apiClient.get<ApiResponse<PaginatedResponse<ChainEvent>>>(
+      '/events',
+      { params },
+    );
     return data.data;
   },
 };
