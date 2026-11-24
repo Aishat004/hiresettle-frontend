@@ -17,6 +17,7 @@ import { useAuthStore } from '@/lib/hooks/use-auth-store';
 import {
   milestoneStatusBadge, milestoneStatusLabel,
   stroopsToUsdc, cn, formatRetentionCountdown, formatLiveCountdown, timerPillClass,
+  formatFileSize, isUnsafeProofFile,
 } from '@/lib/utils';
 import { CopyButton } from '@/components/ui/CopyButton';
 import { toReadableError } from '@/lib/utils/toast-error';
@@ -290,11 +291,13 @@ function MilestoneRow({
 }) {
   const { address } = useAuthStore();
   const [loading, setLoading]               = useState(false);
-  const [proofInput, setProofInput]         = useState('');
   const [showProofInput, setShowProofInput] = useState(false);
   const [timer, setTimer]                   = useState<RetentionTimer | null>(null);
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason]       = useState('');
+  const [showResolveModal, setShowResolveModal] = useState(false);
+  const [resolveApprove, setResolveApprove]     = useState(true);
+  const [rationale, setRationale]               = useState('');
 
   // tx progress modal
   const { state: txState, open: openTx, reset: resetTx, onStatus, resumeCheck } = useTxProgress();
@@ -375,6 +378,14 @@ function MilestoneRow({
   const canDispute     = isActive && milestone.status === 'ProofSubmitted' && userRole === 'company';
   const canResolve     = isActive && milestone.status === 'Disputed' && userRole === 'arbiter';
 
+  const proofMetadata = milestone.proofMetadata ?? null;
+  const unsafeProof   = isUnsafeProofFile(proofMetadata?.fileName, proofMetadata?.fileType);
+  const proofUrl      = milestone.proofHash
+    ? (milestone.proofHash.startsWith('ipfs://')
+        ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
+        : milestone.proofHash)
+    : '';
+
   return (
     <>
       {/* Transaction progress modal — rendered outside the row layout flow */}
@@ -421,22 +432,44 @@ function MilestoneRow({
               </div>
             )}
 
-            {/* Proof hash */}
+            {/* Proof hash + file metadata */}
             {milestone.proofHash && (
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="text-xs text-gray-400">Proof:</span>
-                <a
-                  href={milestone.proofHash.startsWith('ipfs://')
-                    ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
-                    : milestone.proofHash}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs flex items-center gap-1"
-                >
-                   {milestone.proofHash}
-                   <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                 </a>
-                 <CopyButton value={milestone.proofHash} label="proof hash" />
+              <div className="mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400">Proof:</span>
+                  <a
+                    href={proofUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => {
+                      if (!unsafeProof) return;
+                      e.preventDefault();
+                      if (window.confirm(
+                        'This proof is an executable or unrecognized file type. ' +
+                          'Only open files you trust. Open it anyway?',
+                      )) {
+                        window.open(proofUrl, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs flex items-center gap-1"
+                  >
+                    {milestone.proofHash}
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                  </a>
+                </div>
+
+                {proofMetadata && (
+                  <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                    {proofMetadata.fileName} · {formatFileSize(proofMetadata.fileSize)} · {proofMetadata.fileType || 'unknown type'}
+                  </p>
+                )}
+
+                {unsafeProof && (
+                  <div className="mt-1 flex items-start gap-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Executable or unrecognized file type — open with caution.</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -446,6 +479,14 @@ function MilestoneRow({
               <div className="mb-2 rounded-md border border-red-100 bg-red-50 p-2">
                 <p className="text-xs font-medium text-red-700 mb-0.5">Dispute reason</p>
                 <p className="text-xs text-red-800 whitespace-pre-wrap">{milestone.disputeReason}</p>
+              </div>
+            )}
+
+            {/* Resolution rationale (visible to all parties after resolution) */}
+            {milestone.status === 'Resolved' && milestone.resolutionRationale && (
+              <div className="mb-2 rounded-md border border-purple-100 bg-purple-50 p-2">
+                <p className="text-xs font-medium text-purple-700 mb-0.5">Arbiter rationale</p>
+                <p className="text-xs text-purple-900 whitespace-pre-wrap">{milestone.resolutionRationale}</p>
               </div>
             )}
 
@@ -483,45 +524,23 @@ function MilestoneRow({
               {/* Submit proof */}
               {canSubmitProof && !loading && (
                 showProofInput ? (
-                  <div className="flex items-center gap-2 w-full">
-                    <input
-                      type="text"
-                      placeholder="ipfs://Qm... or https://..."
-                      value={proofInput}
-                      onChange={(e) => setProofInput(e.target.value)}
-                      className="input flex-1 text-xs"
-                      onKeyDown={(e) => e.key === 'Enter' && wrap(async () => {
-                        if (!proofInput.trim()) throw new Error('Enter a proof hash');
-                        await submitProof({
-                          callerAddress: address!,
-                          engagementId: engagement.id,
-                          milestoneIndex: milestone.milestoneIndex,
-                          proofHash: proofInput.trim(),
-                        }, onStatus);
-                        setShowProofInput(false);
-                        setProofInput('');
-                      })}
-                    />
-                    <button
-                      onClick={() => wrap(async () => {
-                        if (!proofInput.trim()) throw new Error('Enter a proof hash');
-                        await submitProof({
-                          callerAddress: address!,
-                          engagementId: engagement.id,
-                          milestoneIndex: milestone.milestoneIndex,
-                          proofHash: proofInput.trim(),
-                        }, onStatus);
-                        setShowProofInput(false);
-                        setProofInput('');
-                      })}
-                      className="btn-primary text-xs"
-                    >
-                      Submit
-                    </button>
-                    <button onClick={() => setShowProofInput(false)} className="btn-ghost text-xs">
-                      Cancel
-                    </button>
-                  </div>
+                  <ProofSubmitForm
+                    onHashReady={(hash, metadata) => wrap(async () => {
+                      await submitProof({
+                        callerAddress: address!,
+                        engagementId: engagement.id,
+                        milestoneIndex: milestone.milestoneIndex,
+                        proofHash: hash,
+                      }, onStatus);
+                      if (metadata) {
+                        await milestonesApi.submitProofMetadata(
+                          engagement.id, milestone.milestoneIndex, metadata,
+                        );
+                      }
+                      setShowProofInput(false);
+                    })}
+                    onCancel={() => setShowProofInput(false)}
+                  />
                 ) : (
                   <button onClick={() => setShowProofInput(true)} className="btn-secondary text-xs">
                     <Upload className="w-3.5 h-3.5" />
@@ -562,24 +581,14 @@ function MilestoneRow({
               {canResolve && !loading && (
                 <>
                   <button
-                    onClick={() => wrap(() => resolveDispute({
-                      callerAddress: address!,
-                      engagementId: engagement.id,
-                      milestoneIndex: milestone.milestoneIndex,
-                      approve: true,
-                    }, onStatus))}
+                    onClick={() => { setResolveApprove(true); setShowResolveModal(true); }}
                     className="btn-primary text-xs"
                   >
                     <ThumbsUp className="w-3.5 h-3.5" />
                     Approve — release payment
                   </button>
                   <button
-                    onClick={() => wrap(() => resolveDispute({
-                      callerAddress: address!,
-                      engagementId: engagement.id,
-                      milestoneIndex: milestone.milestoneIndex,
-                      approve: false,
-                    }, onStatus))}
+                    onClick={() => { setResolveApprove(false); setShowResolveModal(true); }}
                     className="btn-danger text-xs"
                   >
                     <ThumbsDown className="w-3.5 h-3.5" />
@@ -642,11 +651,78 @@ function MilestoneRow({
           </div>
         </div>
       )}
+
+      {/* Resolution rationale modal (arbiter) */}
+      {showResolveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">
+              {resolveApprove ? 'Approve milestone' : 'Reject milestone'}
+            </h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Provide a written rationale for your decision on &ldquo;{milestone.name}&rdquo;.
+              Both parties will see this explanation.
+            </p>
+            <textarea
+              value={rationale}
+              onChange={(e) => setRationale(e.target.value)}
+              rows={4}
+              required
+              minLength={MIN_RATIONALE}
+              placeholder="Explain your reasoning for this resolution decision…"
+              className="input w-full text-xs"
+            />
+            <p className={cn(
+              'text-xs mt-1',
+              rationale.trim().length < MIN_RATIONALE ? 'text-gray-400' : 'text-green-600',
+            )}>
+              {rationale.trim().length}/{MIN_RATIONALE} characters minimum
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => { setShowResolveModal(false); setRationale(''); }}
+                className="btn-ghost text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={rationale.trim().length < MIN_RATIONALE}
+                onClick={() => {
+                  const text = rationale.trim();
+                  const approve = resolveApprove;
+                  setShowResolveModal(false);
+                  wrap(async () => {
+                    await resolveDispute({
+                      callerAddress: address!,
+                      engagementId: engagement.id,
+                      milestoneIndex: milestone.milestoneIndex,
+                      approve,
+                    }, onStatus);
+                    await milestonesApi.submitResolutionRationale(
+                      engagement.id,
+                      milestone.milestoneIndex,
+                      text,
+                    );
+                    setRationale('');
+                  });
+                }}
+                className={cn('text-xs disabled:opacity-50', resolveApprove ? 'btn-primary' : 'btn-danger')}
+              >
+                {resolveApprove
+                  ? <><ThumbsUp className="w-3.5 h-3.5" /> Approve &amp; release</>
+                  : <><ThumbsDown className="w-3.5 h-3.5" /> Reject &amp; reset</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
 const MIN_DISPUTE_REASON = 20;
+const MIN_RATIONALE = 20;
 
 // ---------------------------------------------------------------------------
 // CalendarMenu — dropdown for adding a retention unlock reminder
