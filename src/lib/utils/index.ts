@@ -14,7 +14,24 @@ export function shortAddress(address: string, chars = 4): string {
 }
 
 export async function copyToClipboard(text: string) {
-  await navigator.clipboard.writeText(text);
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fall through to fallback
+    }
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!ok) throw new Error('Copy failed');
 }
 
 /** Convert stroops to human-readable USDC (7 decimal places on Stellar) */
@@ -201,35 +218,43 @@ export function timerPillClass(daysRemaining: number, unlockable: boolean): stri
   return 'timer-active';
 }
 
-// ── Chain event export ────────────────────────────────────────────────────────
+// ── Proof file helpers ─────────────────────────────────────────────────────────
+
+/** Format a byte count into a human-readable string, e.g. "1.2 MB". */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** i;
+  return `${i === 0 ? value : Math.round(value * 10) / 10} ${units[i]}`;
+}
+
+/** File extensions that can execute code or install software on a machine. */
+const EXECUTABLE_EXTENSIONS = new Set([
+  'exe', 'msi', 'bat', 'cmd', 'com', 'cpl', 'scr', 'pif', 'msc', 'gadget',
+  'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'jar',
+  'app', 'dmg', 'pkg', 'deb', 'rpm', 'apk', 'sh', 'bash', 'zsh', 'run',
+  'bin', 'dll', 'so', 'reg', 'lnk', 'iso', 'img',
+]);
+
+/** Extract the lowercased extension (without the dot) from a file name. */
+function fileExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  return dot === -1 ? '' : fileName.slice(dot + 1).toLowerCase();
+}
 
 /**
- * Trigger a browser download of chain events as a pretty-printed JSON file for
- * auditing. Each row carries the event name, ledger, tx hash, payload and
- * timestamp; the filename is derived from the engagement ID and the date, e.g.
- * `chain-events-ENG-20260101-ABCD1234-2026-11-21.json`.
+ * Returns true when a proof file should be opened with a warning — either it
+ * has an executable/scripting extension, or its type is unknown/opaque
+ * (missing MIME type or the generic "application/octet-stream").
  */
-export function downloadChainEventsJson(
-  events: ChainEvent[],
-  engagementId?: string | null,
-): void {
-  const rows = events.map((ev) => ({
-    eventName: ev.eventName,
-    ledger: ev.ledger,
-    txHash: ev.txHash,
-    payload: ev.payload,
-    timestamp: ev.createdAt,
-  }));
+export function isUnsafeProofFile(
+  fileName?: string | null,
+  mimeType?: string | null,
+): boolean {
+  const ext = fileName ? fileExtension(fileName) : '';
+  if (ext && EXECUTABLE_EXTENSIONS.has(ext)) return true;
 
-  const date = format(new Date(), 'yyyy-MM-dd');
-  const slug = engagementId
-    ? engagementId.replace(/[^A-Za-z0-9._-]/g, '-')
-    : 'all-engagements';
-  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `chain-events-${slug}-${date}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const type = (mimeType ?? '').toLowerCase();
+  return !type || type === 'application/octet-stream';
 }
