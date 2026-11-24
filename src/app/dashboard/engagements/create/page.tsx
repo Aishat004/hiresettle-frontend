@@ -60,6 +60,7 @@ export default function CreateEngagementPage() {
   const searchParams = useSearchParams();
   const cloneFromId = searchParams.get('cloneFrom');
   const { address } = useAuthStore();
+  const online = useOnline();
 
   const [engagementId]   = useState(generateEngagementId);
   const [recruiterAddress, setRecruiterAddress] = useState('');
@@ -220,6 +221,11 @@ export default function CreateEngagementPage() {
 
   const totalPercent = milestones.reduce((s, m) => s + (Number(m.paymentPercent) || 0), 0);
   const percentValid = totalPercent === 100;
+
+  const totalStroops = useMemo<bigint | null>(() => {
+    if (amountError(totalUsdc) !== null) return null;
+    try { return usdcToStroops(totalUsdc); } catch { return null; }
+  }, [totalUsdc]);
 
   /** Per-milestone retentionDays errors, keyed by index. */
   const milestoneRetentionErrors = useMemo<Record<number, string>>(() => {
@@ -735,6 +741,11 @@ export default function CreateEngagementPage() {
                     />
                     <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
                   </div>
+                  {totalStroops !== null && (
+                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                      = {stroopsToUsdc((totalStroops * BigInt(Math.max(0, Number(m.paymentPercent) || 0))) / 100n, 2)} USDC
+                    </span>
+                  )}
                   {m.kind === 'RETENTION' && (
                     <div className="relative w-24">
                       <input
@@ -782,7 +793,7 @@ export default function CreateEngagementPage() {
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={loading || !formIsValid}
+            disabled={loading || !formIsValid || !online}
             className="btn-primary flex-1"
           >
             {loading ? (
