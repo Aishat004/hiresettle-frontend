@@ -19,7 +19,7 @@ import {
   stroopsToUsdc, cn, formatRetentionCountdown, formatLiveCountdown, timerPillClass,
   formatFileSize, isUnsafeProofFile,
 } from '@/lib/utils';
-import { toast } from 'sonner';
+import { CopyButton } from '@/components/ui/CopyButton';
 import { toReadableError } from '@/lib/utils/toast-error';
 import { downloadIcs, googleCalendarUrl } from '@/lib/utils/calendar';
 import type { Engagement, Milestone, MilestoneStatus, RetentionTimer } from '@/types';
