@@ -1,17 +1,36 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { Plus, Briefcase, Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { engagementsApi } from '@/lib/api/services';
-import { useAuthStore } from '@/lib/hooks/use-auth-store';
-import { EngagementCard } from '@/components/engagements/EngagementCard';
-import type { Engagement, EngagementStatus } from '@/types';
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import {
+  Plus,
+  Briefcase,
+  Search,
+  X,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { engagementsApi } from "@/lib/api/services";
+import { useAuthStore } from "@/lib/hooks/use-auth-store";
+import { EngagementCard } from "@/components/engagements/EngagementCard";
+import { engagementKeys } from "@/lib/query-keys";
+import type { Engagement, EngagementStatus } from "@/types";
 
 const DEBOUNCE_MS = 300;
 const PAGE_SIZE = 10;
+
+type SortOption = 'newest' | 'oldest' | 'amount_desc' | 'amount_asc' | 'status';
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'amount_desc', label: 'Highest amount' },
+  { value: 'amount_asc', label: 'Lowest amount' },
+  { value: 'status', label: 'Status' },
+];
 
 type ViewAs = 'company' | 'recruiter' | 'arbiter';
 
@@ -45,30 +64,30 @@ function EngagementsContent() {
   const initialStatus = (searchParams.get('status') ?? '') as EngagementStatus | '';
   const initialViewAs = (searchParams.get('viewAs') ?? 'company') as ViewAs;
   const initialPage = Math.max(1, Number(searchParams.get('page') ?? '1'));
+  const initialSort = (searchParams.get('sort') ?? 'newest') as SortOption;
 
   const [inputValue, setInputValue] = useState(initialSearch);
   const [committedSearch, setCommittedSearch] = useState(initialSearch);
-  const [statusFilter, setStatusFilter] = useState<EngagementStatus | ''>(initialStatus);
+  const [statusFilter, setStatusFilter] = useState<EngagementStatus | "">(
+    initialStatus,
+  );
   const [viewAs, setViewAs] = useState<ViewAs>(initialViewAs);
   const [page, setPage] = useState(initialPage);
-
-  const [engagements, setEngagements] = useState<Engagement[]>([]);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [sort, setSort] = useState<SortOption>(initialSort);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- URL sync helper ---
   const pushParams = useCallback(
-    (q: string, status: EngagementStatus | '', role: ViewAs, p: number) => {
+    (q: string, status: EngagementStatus | '', role: ViewAs, p: number, s: SortOption) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (status) params.set('status', status);
       if (role !== 'company') params.set('viewAs', role);
       if (p > 1) params.set('page', String(p));
+      if (s !== 'newest') params.set('sort', s);
       const qs = params.toString();
-      router.replace(qs ? `?${qs}` : '?', { scroll: false });
+      router.replace(qs ? `?${qs}` : "?", { scroll: false });
     },
     [router],
   );
@@ -80,35 +99,41 @@ function EngagementsContent() {
     debounceRef.current = setTimeout(() => {
       setCommittedSearch(value);
       setPage(1);
-      pushParams(value, statusFilter, viewAs, 1);
+      pushParams(value, statusFilter, viewAs, 1, sort);
     }, DEBOUNCE_MS);
   };
 
   const clearSearch = () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    setInputValue('');
-    setCommittedSearch('');
+    setInputValue("");
+    setCommittedSearch("");
     setPage(1);
-    pushParams('', statusFilter, viewAs, 1);
+    pushParams('', statusFilter, viewAs, 1, sort);
   };
 
   // --- Filter changes — always reset to page 1 ---
-  const handleStatusChange = (value: EngagementStatus | '') => {
+  const handleStatusChange = (value: EngagementStatus | "") => {
     setStatusFilter(value);
     setPage(1);
-    pushParams(committedSearch, value, viewAs, 1);
+    pushParams(committedSearch, value, viewAs, 1, sort);
   };
 
   const handleViewAsChange = (role: ViewAs) => {
     setViewAs(role);
     setPage(1);
-    pushParams(committedSearch, statusFilter, role, 1);
+    pushParams(committedSearch, statusFilter, role, 1, sort);
+  };
+
+  const handleSortChange = (value: SortOption) => {
+    setSort(value);
+    setPage(1);
+    pushParams(committedSearch, statusFilter, viewAs, 1, value);
   };
 
   // --- Pagination ---
   const goToPage = (p: number) => {
     setPage(p);
-    pushParams(committedSearch, statusFilter, viewAs, p);
+    pushParams(committedSearch, statusFilter, viewAs, p, sort);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -137,6 +162,7 @@ function EngagementsContent() {
         search: committedSearch || undefined,
         page,
         limit: PAGE_SIZE,
+        sort,
       })
       .then((res) => {
         setEngagements(res.data);
@@ -145,9 +171,15 @@ function EngagementsContent() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [address, isHydrated, committedSearch, statusFilter, viewAs, page]);
+   }, [address, isHydrated, committedSearch, statusFilter, viewAs, page, sort]);
 
   const isSearching = committedSearch.trim().length > 0;
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
   return (
     <div>
@@ -159,7 +191,7 @@ function EngagementsContent() {
             {loading ? (
               <span className="inline-block w-24 h-3 bg-gray-100 rounded animate-pulse" />
             ) : (
-              `${total} engagement${total !== 1 ? 's' : ''} found`
+              `${total} engagement${total !== 1 ? "s" : ""} found`
             )}
           </p>
         </div>
@@ -173,14 +205,15 @@ function EngagementsContent() {
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         {/* Role toggle */}
         <div className="flex rounded-xl border border-gray-200 bg-white overflow-hidden">
-          {(['company', 'recruiter', 'arbiter'] as const).map((role) => (
+          {(["company", "recruiter", "arbiter"] as const).map((role) => (
             <button
               key={role}
               onClick={() => handleViewAsChange(role)}
-              className={`px-3.5 py-2 text-xs font-medium transition-colors capitalize ${viewAs === role
-                  ? 'bg-brand-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-50'
-                }`}
+              className={`px-3.5 py-2 text-xs font-medium transition-colors capitalize ${
+                viewAs === role
+                  ? "bg-brand-600 text-white"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
             >
               As {role}
             </button>
@@ -211,7 +244,9 @@ function EngagementsContent() {
         {/* Status */}
         <select
           value={statusFilter}
-          onChange={(e) => handleStatusChange(e.target.value as EngagementStatus | '')}
+          onChange={(e) =>
+            handleStatusChange(e.target.value as EngagementStatus | "")
+          }
           className="input w-auto"
         >
           <option value="">All statuses</option>
@@ -219,6 +254,17 @@ function EngagementsContent() {
           <option value="Completed">Completed</option>
           <option value="ReplacementRequested">Replacement requested</option>
           <option value="Cancelled">Cancelled</option>
+        </select>
+
+        {/* Sort */}
+        <select
+          value={sort}
+          onChange={(e) => handleSortChange(e.target.value as SortOption)}
+          className="input w-auto"
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
       </div>
 
@@ -233,6 +279,16 @@ function EngagementsContent() {
             </div>
           ))}
         </div>
+      ) : engagementsQuery.isError ? (
+        <div className="card p-8 text-center">
+          <p className="text-sm text-red-600">Failed to load engagements.</p>
+          <button
+            onClick={() => engagementsQuery.refetch()}
+            className="btn-secondary mt-4"
+          >
+            Retry
+          </button>
+        </div>
       ) : engagements.length === 0 ? (
         <div className="card p-12 text-center">
           <Briefcase className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -244,21 +300,29 @@ function EngagementsContent() {
               <p className="text-xs text-gray-400 mt-1">
                 Try a different search term or clear the filter.
               </p>
-              <button onClick={clearSearch} className="btn-secondary mt-4 inline-flex">
+              <button
+                onClick={clearSearch}
+                className="btn-secondary mt-4 inline-flex"
+              >
                 <X className="w-4 h-4" />
                 Clear search
               </button>
             </>
           ) : (
             <>
-              <p className="text-sm font-medium text-gray-700">No engagements found</p>
-              <p className="text-xs text-gray-400 mt-1">
-                {viewAs === 'arbiter'
-                  ? 'You are not assigned as arbiter on any engagements.'
-                  : 'Create your first engagement to get started.'}
+              <p className="text-sm font-medium text-gray-700">
+                No engagements found
               </p>
-              {viewAs !== 'arbiter' && (
-                <Link href="/dashboard/engagements/create" className="btn-primary mt-4 inline-flex">
+              <p className="text-xs text-gray-400 mt-1">
+                {viewAs === "arbiter"
+                  ? "You are not assigned as arbiter on any engagements."
+                  : "Create your first engagement to get started."}
+              </p>
+              {viewAs !== "arbiter" && (
+                <Link
+                  href="/dashboard/engagements/create"
+                  className="btn-primary mt-4 inline-flex"
+                >
                   <Plus className="w-4 h-4" />
                   New engagement
                 </Link>

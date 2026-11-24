@@ -2,7 +2,7 @@ import { apiClient } from './client';
 import type {
   ApiResponse, PaginatedResponse,
   Engagement, Milestone, RetentionTimer,
-  Notification, User, CreateEngagementInput,
+  Notification, User, CreateEngagementInput, ProofMetadata,
 } from '@/types';
 
 // ----------------------------------------------------------
@@ -47,6 +47,7 @@ export const engagementsApi = {
     arbiterAddress?: string;
     status?: string;
     search?: string;
+    sort?: string;
     page?: number;
     limit?: number;
   }): Promise<PaginatedResponse<Engagement>> => {
@@ -95,6 +96,18 @@ export const milestonesApi = {
   /** Store the off-chain written reason for a raised dispute */
   submitDisputeReason: async (engagementId: string, index: number, reason: string): Promise<void> => {
     await apiClient.post(`/engagements/${engagementId}/milestones/${index}/dispute-reason`, { reason });
+  },
+
+  /** Store the off-chain file metadata (name, size, type) for a submitted proof */
+  submitProofMetadata: async (
+    engagementId: string,
+    index: number,
+    metadata: ProofMetadata,
+  ): Promise<void> => {
+    await apiClient.post(`/engagements/${engagementId}/milestones/${index}/proof-metadata`, metadata);
+  /** Store the arbiter's written rationale after resolving a dispute */
+  submitResolutionRationale: async (engagementId: string, index: number, rationale: string): Promise<void> => {
+    await apiClient.post(`/engagements/${engagementId}/milestones/${index}/resolution-rationale`, { rationale });
   },
 };
 
@@ -152,8 +165,15 @@ export const uploadApi = {
 // Events
 // ----------------------------------------------------------
 export const eventsApi = {
-  list: async (params?: { engagementId?: string; page?: number; limit?: number }) => {
-    const { data } = await apiClient.get('/events', { params });
+  list: async (params?: {
+    engagementId?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<PaginatedResponse<ChainEvent>> => {
+    const { data } = await apiClient.get<ApiResponse<PaginatedResponse<ChainEvent>>>(
+      '/events',
+      { params },
+    );
     return data.data;
   },
 };
