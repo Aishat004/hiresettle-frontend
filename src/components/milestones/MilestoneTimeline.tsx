@@ -3,23 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircle2,
-  Clock,
-  Lock,
-  AlertTriangle,
-  Upload,
-  ThumbsUp,
-  ThumbsDown,
-  XCircle,
-  Loader2,
-  ExternalLink,
-  Copy,
-  Check,
-  CalendarPlus,
-  Chrome,
-  Download,
-  ChevronDown,
-} from "lucide-react";
+  CheckCircle2, Clock, Lock, AlertTriangle, Chrome,
+  Upload, ThumbsUp, ThumbsDown, XCircle, Loader2,
+  ExternalLink, Copy, Check, CalendarPlus, Download, ChevronDown,
+} from 'lucide-react';
 import {
   unlockMilestone,
   submitProof,
@@ -33,19 +20,15 @@ import { milestonesApi } from "@/lib/api/services";
 import { timerKeys } from "@/lib/query-keys";
 import { useAuthStore } from "@/lib/hooks/use-auth-store";
 import {
-  milestoneStatusBadge,
-  milestoneStatusLabel,
-  stroopsToUsdc,
-  cn,
-  formatRetentionCountdown,
-  formatLiveCountdown,
-  timerPillClass,
-} from "@/lib/utils";
-import { toast } from "sonner";
-import { toReadableError } from "@/lib/utils/toast-error";
-import { downloadIcs, googleCalendarUrl } from "@/lib/utils/calendar";
-import type { Engagement, Milestone, MilestoneStatus } from "@/types";
-import { ProofSubmitForm } from "./ProofSubmitForm";
+  milestoneStatusBadge, milestoneStatusLabel,
+  stroopsToUsdc, cn, formatRetentionCountdown, formatLiveCountdown, timerPillClass,
+  formatFileSize, isUnsafeProofFile,
+} from '@/lib/utils';
+import { CopyButton } from '@/components/ui/CopyButton';
+import { toReadableError } from '@/lib/utils/toast-error';
+import { downloadIcs, googleCalendarUrl } from '@/lib/utils/calendar';
+import type { Engagement, Milestone, MilestoneStatus, RetentionTimer } from '@/types';
+import { ProofSubmitForm } from './ProofSubmitForm';
 
 interface Props {
   engagement: Engagement;
@@ -354,8 +337,7 @@ function MilestoneRow({
   onUpdate: () => void;
 }) {
   const { address } = useAuthStore();
-  const [loading, setLoading] = useState(false);
-  const [proofInput, setProofInput] = useState("");
+  const [loading, setLoading]               = useState(false);
   const [showProofInput, setShowProofInput] = useState(false);
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason]       = useState('');
@@ -375,14 +357,13 @@ function MilestoneRow({
   // Store the last action so Retry can replay it
   const retryFnRef = useRef<(() => Promise<unknown>) | null>(null);
 
-  const timerQuery = useQuery({
-    queryKey: timerKeys.detail(engagement.id, milestone.milestoneIndex),
-    queryFn: () =>
-      milestonesApi.getTimer(engagement.id, milestone.milestoneIndex),
-    enabled: milestone.kind === "Retention" && milestone.status === "Locked",
-    staleTime: 30_000,
-  });
-  const timer = timerQuery.data;
+  useEffect(() => {
+    if (milestone.kind === 'Retention' && milestone.status === 'Locked') {
+      milestonesApi.getTimer(engagement.id, milestone.milestoneIndex)
+        .then(setTimer)
+        .catch(() => {});
+    }
+  }, [engagement.id, milestone.id, milestone.kind, milestone.milestoneIndex, milestone.status]);
 
   const isActive =
     engagement.status === "Active" ||
@@ -419,24 +400,21 @@ function MilestoneRow({
    *  4. On success calls onUpdate(); modal stays open until user dismisses
    *  5. On error the modal shows the failed step — no alert()
    */
-  const wrap = useCallback(
-    async (fn: () => Promise<unknown>) => {
-      if (!address || loading) return;
-      retryFnRef.current = fn;
-      openTx();
-      setLoading(true);
-      try {
-        await fn();
-        onUpdate();
-      } catch {
-        // Error state is already reflected in the modal via onStatus events.
-        // No alert() needed.
-      } finally {
-        setLoading(false);
-      }
-    },
-    [address, loading, openTx, onUpdate],
-  );
+  const wrap = useCallback(async (fn: () => Promise<unknown>) => {
+    if (!address || loading) return;
+    retryFnRef.current = fn;
+    openTx();
+    setLoading(true);
+    try {
+      await fn();
+      onUpdate();
+    } catch {
+      // Error state is already reflected in the modal via onStatus events.
+      // No alert() needed.
+    } finally {
+      setLoading(false);
+    }
+  }, [address, loading, openTx, onUpdate]);
 
   const handleRetry = useCallback(() => {
     if (retryFnRef.current) wrap(retryFnRef.current);
@@ -465,6 +443,14 @@ function MilestoneRow({
     isActive && milestone.status === "ProofSubmitted" && userRole === "company";
   const canResolve =
     isActive && milestone.status === "Disputed" && userRole === "arbiter";
+
+  const proofMetadata = milestone.proofMetadata ?? null;
+  const unsafeProof   = isUnsafeProofFile(proofMetadata?.fileName, proofMetadata?.fileType);
+  const proofUrl      = milestone.proofHash
+    ? (milestone.proofHash.startsWith('ipfs://')
+        ? `https://ipfs.io/ipfs/${milestone.proofHash.replace('ipfs://', '')}`
+        : milestone.proofHash)
+    : '';
 
   return (
     <>
@@ -538,23 +524,44 @@ function MilestoneRow({
                 </button>
               )}
 
-            {/* Proof hash */}
+            {/* Proof hash + file metadata */}
             {milestone.proofHash && (
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="text-xs text-gray-400">Proof:</span>
-                <a
-                  href={
-                    milestone.proofHash.startsWith("ipfs://")
-                      ? `https://ipfs.io/ipfs/${milestone.proofHash.replace("ipfs://", "")}`
-                      : milestone.proofHash
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs flex items-center gap-1"
-                >
-                  {milestone.proofHash}
-                  <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                </a>
+              <div className="mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400">Proof:</span>
+                  <a
+                    href={proofUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => {
+                      if (!unsafeProof) return;
+                      e.preventDefault();
+                      if (window.confirm(
+                        'This proof is an executable or unrecognized file type. ' +
+                          'Only open files you trust. Open it anyway?',
+                      )) {
+                        window.open(proofUrl, '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    className="text-xs text-brand-600 hover:underline font-mono truncate max-w-xs flex items-center gap-1"
+                  >
+                    {milestone.proofHash}
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                  </a>
+                </div>
+
+                {proofMetadata && (
+                  <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                    {proofMetadata.fileName} · {formatFileSize(proofMetadata.fileSize)} · {proofMetadata.fileType || 'unknown type'}
+                  </p>
+                )}
+
+                {unsafeProof && (
+                  <div className="mt-1 flex items-start gap-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span>Executable or unrecognized file type — open with caution.</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -619,64 +626,25 @@ function MilestoneRow({
               )}
 
               {/* Submit proof */}
-              {canSubmitProof &&
-                !loading &&
-                (showProofInput ? (
-                  <div className="flex items-center gap-2 w-full">
-                    <input
-                      type="text"
-                      placeholder="ipfs://Qm... or https://..."
-                      value={proofInput}
-                      onChange={(e) => setProofInput(e.target.value)}
-                      className="input flex-1 text-xs"
-                      onKeyDown={(e) =>
-                        e.key === "Enter" &&
-                        wrap(async () => {
-                          if (!proofInput.trim())
-                            throw new Error("Enter a proof hash");
-                          await submitProof(
-                            {
-                              callerAddress: address!,
-                              engagementId: engagement.id,
-                              milestoneIndex: milestone.milestoneIndex,
-                              proofHash: proofInput.trim(),
-                            },
-                            onStatus,
-                          );
-                          setShowProofInput(false);
-                          setProofInput("");
-                        })
+              {canSubmitProof && !loading && (
+                showProofInput ? (
+                  <ProofSubmitForm
+                    onHashReady={(hash, metadata) => wrap(async () => {
+                      await submitProof({
+                        callerAddress: address!,
+                        engagementId: engagement.id,
+                        milestoneIndex: milestone.milestoneIndex,
+                        proofHash: hash,
+                      }, onStatus);
+                      if (metadata) {
+                        await milestonesApi.submitProofMetadata(
+                          engagement.id, milestone.milestoneIndex, metadata,
+                        );
                       }
-                    />
-                    <button
-                      onClick={() =>
-                        wrap(async () => {
-                          if (!proofInput.trim())
-                            throw new Error("Enter a proof hash");
-                          await submitProof(
-                            {
-                              callerAddress: address!,
-                              engagementId: engagement.id,
-                              milestoneIndex: milestone.milestoneIndex,
-                              proofHash: proofInput.trim(),
-                            },
-                            onStatus,
-                          );
-                          setShowProofInput(false);
-                          setProofInput("");
-                        })
-                      }
-                      className="btn-primary text-xs"
-                    >
-                      Submit
-                    </button>
-                    <button
-                      onClick={() => setShowProofInput(false)}
-                      className="btn-ghost text-xs"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                      setShowProofInput(false);
+                    })}
+                    onCancel={() => setShowProofInput(false)}
+                  />
                 ) : (
                   <button
                     onClick={() => setShowProofInput(true)}

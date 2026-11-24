@@ -14,7 +14,24 @@ export function shortAddress(address: string, chars = 4): string {
 }
 
 export async function copyToClipboard(text: string) {
-  await navigator.clipboard.writeText(text);
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fall through to fallback
+    }
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!ok) throw new Error('Copy failed');
 }
 
 /** Convert stroops to human-readable USDC (7 decimal places on Stellar) */
@@ -199,4 +216,45 @@ export function timerPillClass(daysRemaining: number, unlockable: boolean): stri
   if (unlockable || daysRemaining <= 0) return 'timer-ready';
   if (daysRemaining <= 3) return 'timer-approaching';
   return 'timer-active';
+}
+
+// ── Proof file helpers ─────────────────────────────────────────────────────────
+
+/** Format a byte count into a human-readable string, e.g. "1.2 MB". */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** i;
+  return `${i === 0 ? value : Math.round(value * 10) / 10} ${units[i]}`;
+}
+
+/** File extensions that can execute code or install software on a machine. */
+const EXECUTABLE_EXTENSIONS = new Set([
+  'exe', 'msi', 'bat', 'cmd', 'com', 'cpl', 'scr', 'pif', 'msc', 'gadget',
+  'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'jar',
+  'app', 'dmg', 'pkg', 'deb', 'rpm', 'apk', 'sh', 'bash', 'zsh', 'run',
+  'bin', 'dll', 'so', 'reg', 'lnk', 'iso', 'img',
+]);
+
+/** Extract the lowercased extension (without the dot) from a file name. */
+function fileExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf('.');
+  return dot === -1 ? '' : fileName.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * Returns true when a proof file should be opened with a warning — either it
+ * has an executable/scripting extension, or its type is unknown/opaque
+ * (missing MIME type or the generic "application/octet-stream").
+ */
+export function isUnsafeProofFile(
+  fileName?: string | null,
+  mimeType?: string | null,
+): boolean {
+  const ext = fileName ? fileExtension(fileName) : '';
+  if (ext && EXECUTABLE_EXTENSIONS.has(ext)) return true;
+
+  const type = (mimeType ?? '').toLowerCase();
+  return !type || type === 'application/octet-stream';
 }
